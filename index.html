@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioShield Pro | Enterprise Health Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&display=swap');
+        :root { --bg: #030712; --glass: rgba(17, 24, 39, 0.7); --emerald: #10B981; --rose: #F43F5E; --amber: #F59E0B; }
+        body { background-color: var(--bg); color: #F8FAFC; font-family: 'Plus Jakarta Sans', sans-serif; }
+        .glass { background: var(--glass); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .hidden { display: none !important; }
+        @keyframes heart-thump { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.2); } 30% { transform: scale(1); } }
+        .heart-beat { animation: heart-thump 0.8s ease-in-out infinite; fill: var(--rose) !important; }
+        .progress-ring__circle { transition: stroke-dashoffset 0.4s; transform: rotate(-90deg); transform-origin: 50% 50%; }
+        .emergency-strobe { animation: bg-strobe 0.5s infinite; }
+        @keyframes bg-strobe { 0%, 100% { background: #030712; } 50% { background: #450a0a; } }
+    </style>
+</head>
+<body class="antialiased min-h-screen transition-colors duration-300" id="main-body">
+
+    <audio id="alarm-snd" loop src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+    <div id="auth-gate" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950">
+        <div class="glass w-full max-w-[400px] p-10 rounded-[3rem] text-center border-t-4 border-emerald-500">
+            <h1 class="text-3xl font-black italic mb-8">SAFE<span class="text-emerald-500">GUARD</span></h1>
+            <div class="space-y-4">
+                <input type="text" id="login-id" placeholder="Access ID (admin/worker)" class="w-full bg-slate-900 border border-white/10 p-4 rounded-2xl outline-none focus:border-emerald-500">
+                <input type="password" id="login-pw" placeholder="Passcode" class="w-full bg-slate-900 border border-white/10 p-4 rounded-2xl outline-none focus:border-emerald-500">
+                <button onclick="handleAuth()" class="w-full bg-emerald-600 py-4 rounded-2xl font-bold shadow-xl active:scale-95 transition-transform">Authorize</button>
+            </div>
+            <p id="err" class="text-rose-500 mt-4 text-xs font-bold hidden uppercase">Access Denied</p>
+        </div>
+    </div>
+
+    <div id="worker-ui" class="hidden max-w-5xl mx-auto p-6">
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h2 class="text-2xl font-black italic">MY<span class="text-emerald-500">BIO</span></h2>
+                <div class="flex items-center space-x-2 text-[10px] font-bold text-slate-500 uppercase">
+                    <span id="w-user-display">User</span> • <span id="device-stat">OFFLINE</span>
+                </div>
+            </div>
+            <button onclick="location.reload()" class="text-slate-500 text-[10px] font-bold underline">LOGOUT</button>
+        </header>
+
+        <div id="danger-banner" class="hidden bg-rose-600 text-white p-4 rounded-2xl mb-6 text-center animate-pulse font-black uppercase tracking-tighter">
+            ⚠️ EMERGENCY: <span id="emergency-type">CRITICAL STATE</span> ⚠️
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="glass p-10 rounded-[3.5rem] flex flex-col items-center justify-center">
+                <div class="relative flex items-center justify-center w-48 h-48">
+                    <svg width="180" height="180">
+                        <circle class="text-slate-900" stroke="currentColor" stroke-width="12" fill="transparent" r="80" cx="90" cy="90"/>
+                        <circle id="ring" class="progress-ring__circle" stroke="#10B981" stroke-width="12" stroke-linecap="round" fill="transparent" r="80" cx="90" cy="90" style="stroke-dasharray: 502; stroke-dashoffset: 502;"/>
+                    </svg>
+                    <svg id="heart" class="absolute w-12 h-12 text-slate-800" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                </div>
+                <div class="text-center mt-4">
+                    <span id="w-bpm" class="text-6xl font-black">--</span>
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">BPM</p>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <div class="grid grid-cols-2 gap-6">
+                    <div class="glass p-8 rounded-[2.5rem]">
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-1">Body Temp</p>
+                        <h3 id="w-temp" class="text-4xl font-black italic">--°C</h3>
+                    </div>
+                    <div class="glass p-8 rounded-[2.5rem]">
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-1">Fall Status</p>
+                        <h3 id="w-fall" class="text-4xl font-black text-emerald-500 uppercase tracking-tighter">Stable</h3>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-6">
+                    <div class="glass p-8 rounded-[2.5rem]">
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-1">Room Temp</p>
+                        <h3 id="w-room" class="text-3xl font-black text-blue-400 italic">--°C</h3>
+                    </div>
+                    <div class="glass p-8 rounded-[2.5rem] border-l-4 border-emerald-500">
+                        <h4 class="text-[10px] font-black uppercase text-emerald-500 mb-1">System State</h4>
+                        <p id="w-state" class="text-xl font-bold uppercase italic">Syncing...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+            <div class="glass p-6 rounded-[2.5rem]"><canvas id="w-heart-chart" height="150"></canvas></div>
+            <div class="glass p-6 rounded-[2.5rem]"><canvas id="w-temp-chart" height="150"></canvas></div>
+        </div>
+    </div>
+
+    <div id="admin-ui" class="hidden min-h-screen flex">
+        <aside class="w-64 border-r border-white/5 p-6 flex flex-col shrink-0 bg-slate-950">
+            <h1 class="text-xl font-black italic mb-10">SAFE<span class="text-emerald-500">GUARD</span></h1>
+            <nav class="space-y-1 flex-1 text-xs font-bold uppercase tracking-widest">
+                <button class="w-full text-left p-4 rounded-xl bg-emerald-500/10 text-emerald-500">Fleet Monitor</button>
+            </nav>
+            <button onclick="location.reload()" class="p-4 border border-rose-500/20 text-rose-500 rounded-xl text-[10px] font-bold">LOGOUT</button>
+        </aside>
+
+        <main class="flex-1 p-10 overflow-y-auto">
+            <div id="admin-emergency" class="hidden bg-rose-600 p-6 rounded-3xl mb-8 flex justify-between items-center animate-pulse">
+                <h3 class="font-black text-xl text-white">⚠️ ALERT: FALL DETECTED</h3>
+            </div>
+
+            <div class="grid grid-cols-3 gap-6 mb-10">
+                <div class="glass p-8 rounded-[2.5rem] text-center">
+                    <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Live BPM</p>
+                    <h3 id="a-bpm" class="text-5xl font-black italic">--</h3>
+                </div>
+                <div class="glass p-8 rounded-[2.5rem] text-center">
+                    <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Body Temp</p>
+                    <h3 id="a-temp" class="text-5xl font-black italic">--</h3>
+                </div>
+                <div class="glass p-8 rounded-[2.5rem] text-center border-b-4 border-emerald-500">
+                    <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Health State</p>
+                    <h3 id="a-state" class="text-3xl font-black uppercase italic">IDLE</h3>
+                </div>
+            </div>
+
+            <div class="glass rounded-[2.5rem] overflow-hidden">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-white/5 uppercase font-black text-slate-500">
+                        <tr><th class="p-5">Time</th><th class="p-5">Body Temp</th><th class="p-5">BPM</th><th class="p-5">Status</th></tr>
+                    </thead>
+                    <tbody id="history-table">
+                        <tr class="border-t border-white/5 text-slate-400 italic"><td colspan="4" class="p-10 text-center">Waiting for telemetry...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // UPDATED FIREBASE CONFIG
+        const firebaseConfig = {
+            apiKey: "AIzaSyC9utTGHJ9Bp_AVMhemVwUgtgqbXFy7Qpk",
+            authDomain: "health-monitor-new-8e9b7.firebaseapp.com",
+            databaseURL: "https://health-monitor-new-8e9b7-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "health-monitor-new-8e9b7",
+            storageBucket: "health-monitor-new-8e9b7.firebasestorage.app",
+            messagingSenderId: "945049650965",
+            appId: "1:945049650965:web:96408c89262d4bb7f88b1c"
+        };
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const ALARM = document.getElementById('alarm-snd');
+        let charts = {};
+
+        function handleAuth() {
+            const u = document.getElementById('login-id').value;
+            const p = document.getElementById('login-pw').value;
+            if((u === "admin" || u === "worker") && p === "1234") {
+                document.getElementById('auth-gate').classList.add('hidden');
+                document.getElementById(u + '-ui').classList.remove('hidden');
+                document.getElementById('w-user-display').innerText = u.toUpperCase() + "-01";
+                startListening(u);
+            } else { document.getElementById('err').classList.remove('hidden'); }
+        }
+
+        function startListening(role) {
+            if(role === 'worker') {
+                charts.heart = createChart('w-heart-chart', '#10B981', 'Heart Rate');
+                charts.temp = createChart('w-temp-chart', '#3B82F6', 'Body Temp');
+            }
+
+            // LISTENING TO ROOT ("/") TO MATCH ESP32 CODE
+            db.ref('/').on('value', (snap) => {
+                const data = snap.val();
+                if(!data) return;
+
+                // Matched to ESP32 JSON keys: bpm, temperature, roomTemp, status, fallDetected
+                const bpm = data.bpm || 0;
+                const bodyT = data.temperature || 0;
+                const roomT = data.roomTemp || 0;
+                const isFall = data.fallDetected || false;
+                const state = data.status || "IDLE";
+                const device = data.device || "OFFLINE";
+
+                updateUI(role, bpm, bodyT, roomT, isFall, state, device);
+                updateHistory(bpm, bodyT, state);
+            });
+        }
+
+        function createChart(id, color, label) {
+            return new Chart(document.getElementById(id).getContext('2d'), {
+                type: 'line',
+                data: { labels: Array(20).fill(''), datasets: [{ label: label, borderColor: color, data: [], tension: 0.4, pointRadius: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } } }
+            });
+        }
+
+        function updateUI(role, bpm, bodyT, roomT, isFall, state, device) {
+            const emergency = (state === "FALL EMERGENCY" || state === "DANGER");
+            
+            if(emergency) {
+                ALARM.play().catch(() => {}); // Play sound
+                document.getElementById('main-body').classList.add('emergency-strobe');
+            } else {
+                ALARM.pause();
+                document.getElementById('main-body').classList.remove('emergency-strobe');
+            }
+
+            if(role === 'worker') {
+                document.getElementById('w-bpm').innerText = bpm > 0 ? bpm : "--";
+                document.getElementById('w-temp').innerText = bodyT > 0 ? bodyT.toFixed(1) + "°C" : "--°C";
+                document.getElementById('w-room').innerText = roomT > 0 ? roomT.toFixed(1) + "°C" : "--°C";
+                document.getElementById('w-fall').innerText = isFall ? "⚠️ FALL" : "STABLE";
+                document.getElementById('w-fall').className = "text-4xl font-black " + (isFall ? "text-rose-500" : "text-emerald-500");
+                document.getElementById('w-state').innerText = state;
+                document.getElementById('device-stat').innerText = device;
+                document.getElementById('danger-banner').classList.toggle('hidden', !emergency);
+                document.getElementById('emergency-type').innerText = state;
+
+                const offset = 502 - (Math.min(bpm, 180) / 180 * 502);
+                document.getElementById('ring').style.strokeDashoffset = offset;
+                document.getElementById('heart').classList.toggle('heart-beat', bpm > 0);
+
+                if(bpm > 0) updateGraph(charts.heart, bpm);
+                if(bodyT > 0) updateGraph(charts.temp, bodyT);
+            } else {
+                document.getElementById('a-bpm').innerText = bpm || "--";
+                document.getElementById('a-temp').innerText = bodyT ? bodyT.toFixed(1) + "°" : "--";
+                document.getElementById('a-state').innerText = state;
+                document.getElementById('a-state').className = "text-3xl font-black uppercase italic " + (emergency ? "text-rose-500" : "text-emerald-500");
+                document.getElementById('admin-emergency').classList.toggle('hidden', !isFall);
+            }
+        }
+
+        function updateGraph(chart, val) {
+            chart.data.datasets[0].data.push(val);
+            if(chart.data.datasets[0].data.length > 20) chart.data.datasets[0].data.shift();
+            chart.update('none');
+        }
+
+        function updateHistory(bpm, temp, status) {
+            const table = document.getElementById('history-table');
+            const row = `<tr class="border-t border-white/5 hover:bg-white/5 transition-colors">
+                <td class="p-5 font-mono text-slate-500">${new Date().toLocaleTimeString()}</td>
+                <td class="p-5 font-bold">${temp > 0 ? temp.toFixed(1) : "--"}°C</td>
+                <td class="p-5">${bpm > 0 ? bpm : "--"}</td>
+                <td class="p-5 font-black text-[10px] uppercase">${status}</td>
+            </tr>`;
+            if(table.innerText.includes("Waiting")) table.innerHTML = "";
+            table.insertAdjacentHTML('afterbegin', row);
+            if(table.children.length > 10) table.lastChild.remove();
+        }
+    </script>
+</body>
+</html>
