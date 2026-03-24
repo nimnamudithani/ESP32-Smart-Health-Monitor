@@ -1,4 +1,4 @@
-IoT Smart Health & Fall Emergency System (ESP32)
+**IoT Smart Health & Fall Emergency System (ESP32)**
 
 A robust, wearable IoT solution designed for real-time tracking of vital signs and automated emergency detection. This system leverages multi-core processing to ensure high-frequency sensor sampling remains uninterrupted by network latency and cloud synchronization.
 
